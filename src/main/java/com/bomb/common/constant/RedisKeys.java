@@ -8,4 +8,8 @@ public final class RedisKeys {
     public static String payNotifyLock(String alipayTradeNo) {
         return "pay:notify:" + alipayTradeNo;
     }
+
+    public static String vpnProvisionLock(Long orderId) {
+        return "vpn:provision:" + orderId;
+    }
 }

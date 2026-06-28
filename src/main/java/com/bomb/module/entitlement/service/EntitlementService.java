@@ -10,6 +10,8 @@ import com.bomb.module.entitlement.mapper.UserEntitlementMapper;
 import com.bomb.module.order.entity.Order;
 import com.bomb.module.product.entity.Product;
 import com.bomb.module.product.service.ProductService;
+import com.bomb.module.vpn.entity.VpnAccount;
+import com.bomb.module.vpn.service.VpnProvisioningService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +26,7 @@ public class EntitlementService {
 
     private final UserEntitlementMapper userEntitlementMapper;
     private final ProductService productService;
+    private final VpnProvisioningService vpnProvisioningService;
 
     @Transactional
     public UserEntitlement grantEntitlement(Order order) {
@@ -61,7 +64,7 @@ public class EntitlementService {
         if (!EntitlementStatus.ACTIVE.name().equals(entitlement.getStatus())) {
             return null;
         }
-        return toVO(entitlement);
+        return toVO(entitlement, vpnProvisioningService.getByUserId(userId));
     }
 
     public PageResult<EntitlementVO> listMyHistory(Long userId, long page, long size) {
@@ -119,6 +122,10 @@ public class EntitlementService {
     }
 
     private EntitlementVO toVO(UserEntitlement entitlement) {
+        return toVO(entitlement, vpnProvisioningService.getByUserId(entitlement.getUserId()));
+    }
+
+    private EntitlementVO toVO(UserEntitlement entitlement, VpnAccount vpnAccount) {
         long remainingDays = 0;
         if (entitlement.getExpireAt() != null && entitlement.getExpireAt().isAfter(LocalDateTime.now())) {
             remainingDays = ChronoUnit.DAYS.between(LocalDateTime.now(), entitlement.getExpireAt());
@@ -133,6 +140,8 @@ public class EntitlementService {
                 .expireAt(entitlement.getExpireAt())
                 .status(entitlement.getStatus())
                 .remainingDays(remainingDays)
+                .vpnClientName(vpnAccount != null && "ACTIVE".equals(vpnAccount.getStatus()) ? vpnAccount.getClientName() : null)
+                .vpnConfig(vpnAccount != null && "ACTIVE".equals(vpnAccount.getStatus()) ? vpnAccount.getConfigContent() : null)
                 .build();
     }
 }

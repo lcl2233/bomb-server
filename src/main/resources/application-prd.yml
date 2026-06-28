@@ -26,6 +26,17 @@ alipay:
   return-url: http://localhost:5173/pay/result
   sandbox: false
 
+vpn:
+  wireguard:
+    enabled: true
+    host: 64.177.116.240
+    port: 22
+    username: root
+    private-key-path: C:/Users/Administrator/.ssh/id_ed25519
+    script-path: /etc/wireguard/add-client.sh
+    connect-timeout-ms: 15000
+    command-timeout-ms: 60000
+
 logging:
   level:
     com.bomb: debug

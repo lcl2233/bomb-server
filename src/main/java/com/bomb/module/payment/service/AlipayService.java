@@ -17,8 +17,10 @@ import com.bomb.module.order.service.OrderService;
 import com.bomb.module.payment.dto.AlipayPayResponse;
 import com.bomb.module.payment.entity.Payment;
 import com.bomb.module.payment.mapper.PaymentMapper;
+import com.bomb.module.vpn.event.OrderPaidEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +40,7 @@ public class AlipayService {
     private final PaymentMapper paymentMapper;
     private final EntitlementService entitlementService;
     private final StringRedisTemplate stringRedisTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
     public AlipayPayResponse createPagePay(Long userId, String orderNo) {
         Order order = orderService.getByOrderNo(orderNo);
@@ -135,6 +138,7 @@ public class AlipayService {
         }
 
         entitlementService.grantEntitlement(order);
+        eventPublisher.publishEvent(new OrderPaidEvent(this, order.getId(), order.getUserId(), order.getOrderNo()));
         return "success";
     }
 }

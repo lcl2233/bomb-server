@@ -18,4 +18,6 @@ public class EntitlementVO {
     private LocalDateTime expireAt;
     private String status;
     private Long remainingDays;
+    private String vpnClientName;
+    private String vpnConfig;
 }
