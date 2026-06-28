@@ -48,6 +48,7 @@ public class SecurityConfig {
                                 "/api/products/**",
                                 "/api/payments/alipay/notify",
                                 "/api/payments/alipay/return",
+                                "/api/debug/**",
                                 "/doc.html",
                                 "/webjars/**",
                                 "/swagger-ui/**",

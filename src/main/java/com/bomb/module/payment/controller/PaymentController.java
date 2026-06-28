@@ -6,6 +6,7 @@ import com.bomb.module.payment.service.AlipayService;
 import com.bomb.security.SecurityUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,6 +19,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/payments/alipay")
 @RequiredArgsConstructor
+@Slf4j
 public class PaymentController {
 
     private final AlipayService alipayService;
@@ -30,7 +32,17 @@ public class PaymentController {
     @PostMapping("/notify")
     public String notify(HttpServletRequest request) {
         Map<String, String> params = extractParams(request);
-        return alipayService.handleNotify(params);
+        log.info("alipay notify received: orderNo={}, tradeNo={}, tradeStatus={}, totalAmount={}",
+                params.get("out_trade_no"),
+                params.get("trade_no"),
+                params.get("trade_status"),
+                params.get("total_amount"));
+        String result = alipayService.handleNotify(params);
+        log.info("alipay notify finished: orderNo={}, tradeNo={}, result={}",
+                params.get("out_trade_no"),
+                params.get("trade_no"),
+                result);
+        return result;
     }
 
     @GetMapping("/return")

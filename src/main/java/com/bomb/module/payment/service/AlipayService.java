@@ -92,6 +92,11 @@ public class AlipayService {
 
     @Transactional
     public String handleNotify(Map<String, String> params) {
+        String orderNo = params.get("out_trade_no");
+        String alipayTradeNo = params.get("trade_no");
+        String tradeStatus = params.get("trade_status");
+        log.info("alipay notify handling: orderNo={}, tradeNo={}, tradeStatus={}", orderNo, alipayTradeNo, tradeStatus);
+
         try {
             boolean signVerified = AlipaySignature.rsaCheckV1(
                     params,
@@ -100,29 +105,31 @@ public class AlipayService {
                     "RSA2"
             );
             if (!signVerified) {
-                log.warn("alipay notify sign verify failed");
+                log.warn("alipay notify sign verify failed: orderNo={}, tradeNo={}", orderNo, alipayTradeNo);
                 return "failure";
             }
+            log.info("alipay notify sign verified: orderNo={}, tradeNo={}", orderNo, alipayTradeNo);
         } catch (AlipayApiException ex) {
-            log.error("alipay notify verify error", ex);
+            log.error("alipay notify verify error: orderNo={}, tradeNo={}", orderNo, alipayTradeNo, ex);
             return "failure";
         }
 
-        String tradeStatus = params.get("trade_status");
         if (!"TRADE_SUCCESS".equals(tradeStatus) && !"TRADE_FINISHED".equals(tradeStatus)) {
+            log.info("alipay notify ignored non-success status: orderNo={}, tradeStatus={}", orderNo, tradeStatus);
             return "success";
         }
 
-        String orderNo = params.get("out_trade_no");
-        String alipayTradeNo = params.get("trade_no");
         String lockKey = RedisKeys.payNotifyLock(alipayTradeNo);
         Boolean locked = stringRedisTemplate.opsForValue().setIfAbsent(lockKey, "1", Duration.ofMinutes(10));
         if (Boolean.FALSE.equals(locked)) {
+            log.info("alipay notify duplicate ignored: orderNo={}, tradeNo={}", orderNo, alipayTradeNo);
             return "success";
         }
 
         Order order = orderService.getByOrderNo(orderNo);
-        paymentCompletionService.completePaidOrder(order, alipayTradeNo, params.toString());
+        boolean completed = paymentCompletionService.completePaidOrder(order, alipayTradeNo, params.toString());
+        log.info("alipay notify complete order: orderNo={}, tradeNo={}, userId={}, completed={}",
+                orderNo, alipayTradeNo, order.getUserId(), completed);
         return "success";
     }
 
