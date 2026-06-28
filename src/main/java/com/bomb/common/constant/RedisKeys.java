@@ -9,6 +9,10 @@ public final class RedisKeys {
         return "pay:notify:" + alipayTradeNo;
     }
 
+    public static String payCompleteLock(Long orderId) {
+        return "pay:complete:" + orderId;
+    }
+
     public static String vpnProvisionLock(Long orderId) {
         return "vpn:provision:" + orderId;
     }

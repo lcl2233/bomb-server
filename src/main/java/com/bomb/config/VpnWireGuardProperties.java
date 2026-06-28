@@ -14,6 +14,7 @@ public class VpnWireGuardProperties {
     private int port = 22;
     private String username = "root";
     private String privateKeyPath;
+    private String knownHostsPath;
     private String scriptPath = "/etc/wireguard/add-client.sh";
     private int connectTimeoutMs = 15000;
     private int commandTimeoutMs = 60000;

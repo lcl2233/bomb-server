@@ -78,6 +78,14 @@ public class OrderService {
         return order;
     }
 
+    public Order getById(Long id) {
+        Order order = orderMapper.selectById(id);
+        if (order == null) {
+            throw new BusinessException(404, "order not found");
+        }
+        return order;
+    }
+
     @Transactional
     public OrderVO cancelOrder(Long userId, String orderNo) {
         Order order = getByOrderNo(orderNo);
@@ -116,6 +124,15 @@ public class OrderService {
             orderMapper.updateById(order);
         }
         return orders.size();
+    }
+
+    public List<Order> listPendingOrdersForPaymentSync(int withinMinutes, int minOrderAgeSeconds) {
+        LocalDateTime now = LocalDateTime.now();
+        return orderMapper.selectList(new LambdaQueryWrapper<Order>()
+                .eq(Order::getStatus, OrderStatus.PENDING.name())
+                .gt(Order::getCreatedAt, now.minusMinutes(withinMinutes))
+                .lt(Order::getCreatedAt, now.minusSeconds(minOrderAgeSeconds))
+                .orderByAsc(Order::getCreatedAt));
     }
 
     private String generateOrderNo() {

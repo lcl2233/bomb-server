@@ -9,9 +9,9 @@ import com.jcraft.jsch.Session;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,6 +41,12 @@ public class WireGuardSshExecutor {
                 throw new BusinessException("wireguard ssh private key not found: " + privateKeyPath);
             }
             jsch.addIdentity(privateKeyPath.toString());
+
+            Path knownHostsPath = resolveKnownHostsPath();
+            if (!Files.exists(knownHostsPath)) {
+                throw new BusinessException("wireguard ssh known_hosts not found: " + knownHostsPath);
+            }
+            jsch.setKnownHosts(knownHostsPath.toString());
 
             session = jsch.getSession(properties.getUsername(), properties.getHost(), properties.getPort());
             Properties config = new Properties();
@@ -77,6 +83,14 @@ public class WireGuardSshExecutor {
                 session.disconnect();
             }
         }
+    }
+
+    private Path resolveKnownHostsPath() {
+        if (StringUtils.hasText(properties.getKnownHostsPath())) {
+            return Path.of(properties.getKnownHostsPath());
+        }
+        String userHome = System.getProperty("user.home");
+        return Path.of(userHome, ".ssh", "known_hosts");
     }
 
     private void waitForChannel(ChannelExec channel, Duration timeout) throws InterruptedException {

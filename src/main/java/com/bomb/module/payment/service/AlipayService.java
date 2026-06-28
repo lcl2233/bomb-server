@@ -1,32 +1,32 @@
 package com.bomb.module.payment.service;
 
-import cn.hutool.core.util.IdUtil;
 import com.alipay.api.AlipayApiException;
 import com.alipay.api.AlipayClient;
 import com.alipay.api.internal.util.AlipaySignature;
 import com.alipay.api.request.AlipayTradePagePayRequest;
+import com.alipay.api.request.AlipayTradeQueryRequest;
+import com.alipay.api.response.AlipayTradeQueryResponse;
+import cn.hutool.core.util.IdUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bomb.common.constant.OrderStatus;
 import com.bomb.common.constant.PaymentStatus;
 import com.bomb.common.constant.RedisKeys;
 import com.bomb.common.exception.BusinessException;
 import com.bomb.config.AlipayProperties;
-import com.bomb.module.entitlement.service.EntitlementService;
 import com.bomb.module.order.entity.Order;
 import com.bomb.module.order.service.OrderService;
 import com.bomb.module.payment.dto.AlipayPayResponse;
 import com.bomb.module.payment.entity.Payment;
 import com.bomb.module.payment.mapper.PaymentMapper;
-import com.bomb.module.vpn.event.OrderPaidEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.RoundingMode;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -34,13 +34,15 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AlipayService {
 
+    private static final int PAYMENT_SYNC_WITHIN_MINUTES = 30;
+    private static final int PAYMENT_SYNC_MIN_ORDER_AGE_SECONDS = 60;
+
     private final AlipayClient alipayClient;
     private final AlipayProperties alipayProperties;
     private final OrderService orderService;
     private final PaymentMapper paymentMapper;
-    private final EntitlementService entitlementService;
+    private final PaymentCompletionService paymentCompletionService;
     private final StringRedisTemplate stringRedisTemplate;
-    private final ApplicationEventPublisher eventPublisher;
 
     public AlipayPayResponse createPagePay(Long userId, String orderNo) {
         Order order = orderService.getByOrderNo(orderNo);
@@ -120,25 +122,45 @@ public class AlipayService {
         }
 
         Order order = orderService.getByOrderNo(orderNo);
-        if (OrderStatus.PAID.name().equals(order.getStatus())) {
-            return "success";
-        }
-
-        orderService.markPaid(order);
-
-        Payment payment = paymentMapper.selectOne(new LambdaQueryWrapper<Payment>()
-                .eq(Payment::getOrderId, order.getId())
-                .orderByDesc(Payment::getId)
-                .last("limit 1"));
-        if (payment != null) {
-            payment.setAlipayTradeNo(alipayTradeNo);
-            payment.setStatus(PaymentStatus.SUCCESS.name());
-            payment.setNotifyData(params.toString());
-            paymentMapper.updateById(payment);
-        }
-
-        entitlementService.grantEntitlement(order);
-        eventPublisher.publishEvent(new OrderPaidEvent(this, order.getId(), order.getUserId(), order.getOrderNo()));
+        paymentCompletionService.completePaidOrder(order, alipayTradeNo, params.toString());
         return "success";
+    }
+
+    public int syncPendingPayments() {
+        List<Order> pendingOrders = orderService.listPendingOrdersForPaymentSync(
+                PAYMENT_SYNC_WITHIN_MINUTES,
+                PAYMENT_SYNC_MIN_ORDER_AGE_SECONDS
+        );
+        int synced = 0;
+        for (Order order : pendingOrders) {
+            try {
+                if (queryAndCompleteOrder(order)) {
+                    synced++;
+                }
+            } catch (Exception ex) {
+                log.warn("sync alipay payment failed for order {}", order.getOrderNo(), ex);
+            }
+        }
+        return synced;
+    }
+
+    private boolean queryAndCompleteOrder(Order order) throws AlipayApiException {
+        AlipayTradeQueryRequest request = new AlipayTradeQueryRequest();
+        request.setBizContent("{\"out_trade_no\":\"" + order.getOrderNo() + "\"}");
+        AlipayTradeQueryResponse response = alipayClient.execute(request);
+        if (!response.isSuccess()) {
+            if (!"ACQ.TRADE_NOT_EXIST".equals(response.getSubCode())) {
+                log.debug("alipay query pending for order {}: {} {}",
+                        order.getOrderNo(), response.getSubCode(), response.getSubMsg());
+            }
+            return false;
+        }
+
+        String tradeStatus = response.getTradeStatus();
+        if (!"TRADE_SUCCESS".equals(tradeStatus) && !"TRADE_FINISHED".equals(tradeStatus)) {
+            return false;
+        }
+
+        return paymentCompletionService.completePaidOrder(order, response.getTradeNo(), "sync:" + response.getBody());
     }
 }

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bomb.common.constant.RedisKeys;
 import com.bomb.config.VpnWireGuardProperties;
 import com.bomb.module.order.entity.Order;
+import com.bomb.module.order.service.OrderService;
 import com.bomb.module.vpn.dto.SshCommandResult;
 import com.bomb.module.vpn.entity.VpnAccount;
 import com.bomb.module.vpn.mapper.VpnAccountMapper;
@@ -15,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -31,6 +33,7 @@ public class VpnProvisioningService {
     private final VpnWireGuardProperties properties;
     private final WireGuardSshExecutor sshExecutor;
     private final VpnAccountMapper vpnAccountMapper;
+    private final OrderService orderService;
     private final StringRedisTemplate stringRedisTemplate;
 
     public VpnAccount getByUserId(Long userId) {
@@ -82,7 +85,31 @@ public class VpnProvisioningService {
         } catch (Exception ex) {
             saveFailedAccount(order, clientName, ex.getMessage());
             log.error("wireguard provisioning failed for order {}", order.getOrderNo(), ex);
+        } finally {
+            stringRedisTemplate.delete(lockKey);
         }
+    }
+
+    public int retryFailedProvisioning() {
+        List<VpnAccount> failedAccounts = vpnAccountMapper.selectList(new LambdaQueryWrapper<VpnAccount>()
+                .eq(VpnAccount::getStatus, "FAILED"));
+        int retried = 0;
+        for (VpnAccount account : failedAccounts) {
+            try {
+                Order order = orderService.getById(account.getOrderId());
+                if (order == null) {
+                    continue;
+                }
+                provisionAfterPayment(order);
+                VpnAccount latest = getByUserId(account.getUserId());
+                if (latest != null && "ACTIVE".equals(latest.getStatus())) {
+                    retried++;
+                }
+            } catch (Exception ex) {
+                log.warn("retry wireguard provisioning failed for user {}", account.getUserId(), ex);
+            }
+        }
+        return retried;
     }
 
     @Transactional
