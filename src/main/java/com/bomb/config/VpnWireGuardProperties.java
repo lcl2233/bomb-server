@@ -16,6 +16,7 @@ public class VpnWireGuardProperties {
     private String privateKeyPath;
     private String knownHostsPath;
     private String scriptPath = "/etc/wireguard/add-client.sh";
+    private String removeScriptPath = "/etc/wireguard/remove-client.sh";
     private int connectTimeoutMs = 15000;
     private int commandTimeoutMs = 60000;
 }

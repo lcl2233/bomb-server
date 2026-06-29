@@ -16,4 +16,8 @@ public final class RedisKeys {
     public static String vpnProvisionLock(Long orderId) {
         return "vpn:provision:" + orderId;
     }
+
+    public static String vpnRevokeLock(Long userId) {
+        return "vpn:revoke:" + userId;
+    }
 }

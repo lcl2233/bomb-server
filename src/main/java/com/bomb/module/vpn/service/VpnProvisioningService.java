@@ -5,6 +5,7 @@ import com.bomb.common.constant.RedisKeys;
 import com.bomb.config.VpnWireGuardProperties;
 import com.bomb.module.order.entity.Order;
 import com.bomb.module.order.service.OrderService;
+import com.bomb.module.entitlement.service.EntitlementService;
 import com.bomb.module.vpn.dto.SshCommandResult;
 import com.bomb.module.vpn.entity.VpnAccount;
 import com.bomb.module.vpn.mapper.VpnAccountMapper;
@@ -34,6 +35,7 @@ public class VpnProvisioningService {
     private final WireGuardSshExecutor sshExecutor;
     private final VpnAccountMapper vpnAccountMapper;
     private final OrderService orderService;
+    private final EntitlementService entitlementService;
     private final StringRedisTemplate stringRedisTemplate;
 
     public VpnAccount getByUserId(Long userId) {
@@ -55,6 +57,10 @@ public class VpnProvisioningService {
             return;
         }
 
+        String clientName = existing != null && StringUtils.hasText(existing.getClientName())
+                ? existing.getClientName()
+                : buildClientName(order.getUserId());
+
         String lockKey = RedisKeys.vpnProvisionLock(order.getId());
         Boolean locked = stringRedisTemplate.opsForValue().setIfAbsent(lockKey, "1", Duration.ofMinutes(30));
         if (Boolean.FALSE.equals(locked)) {
@@ -62,7 +68,6 @@ public class VpnProvisioningService {
             return;
         }
 
-        String clientName = buildClientName(order.getUserId());
         try {
             SshCommandResult result = sshExecutor.runAddClientScript(clientName);
             if (result.getExitCode() != 0) {
@@ -110,6 +115,87 @@ public class VpnProvisioningService {
             }
         }
         return retried;
+    }
+
+    public int revokeExpiredVpnAccounts() {
+        if (!properties.isEnabled()) {
+            log.info("wireguard revoke disabled");
+            return 0;
+        }
+
+        int expiredCount = entitlementService.expireOutdatedEntitlements();
+        if (expiredCount > 0) {
+            log.info("marked expired entitlements before vpn revoke: {}", expiredCount);
+        }
+
+        List<VpnAccount> activeAccounts = vpnAccountMapper.selectList(new LambdaQueryWrapper<VpnAccount>()
+                .eq(VpnAccount::getStatus, "ACTIVE"));
+        int revoked = 0;
+        for (VpnAccount account : activeAccounts) {
+            if (entitlementService.hasActiveEntitlement(account.getUserId())) {
+                continue;
+            }
+            try {
+                if (revokeVpnAccount(account)) {
+                    revoked++;
+                }
+            } catch (Exception ex) {
+                log.warn("revoke wireguard account failed for user {}", account.getUserId(), ex);
+            }
+        }
+        return revoked;
+    }
+
+    private boolean revokeVpnAccount(VpnAccount account) {
+        String lockKey = RedisKeys.vpnRevokeLock(account.getUserId());
+        Boolean locked = stringRedisTemplate.opsForValue().setIfAbsent(lockKey, "1", Duration.ofMinutes(30));
+        if (Boolean.FALSE.equals(locked)) {
+            log.info("wireguard revoke already running for user {}", account.getUserId());
+            return false;
+        }
+
+        try {
+            if (entitlementService.hasActiveEntitlement(account.getUserId())) {
+                return false;
+            }
+
+            String clientName = account.getClientName();
+            if (!StringUtils.hasText(clientName)) {
+                clientName = buildClientName(account.getUserId());
+            }
+
+            SshCommandResult result = sshExecutor.runRemoveClientScript(clientName);
+            if (result.getExitCode() != 0) {
+                markRevokeFailed(account, result);
+                log.error("wireguard remove script failed for user {} client {} exit={} stderr={}",
+                        account.getUserId(), clientName, result.getExitCode(), result.getStderr());
+                return false;
+            }
+
+            markRevoked(account);
+            log.info("wireguard account revoked for user {} client {}", account.getUserId(), clientName);
+            return true;
+        } finally {
+            stringRedisTemplate.delete(lockKey);
+        }
+    }
+
+    @Transactional
+    protected void markRevoked(VpnAccount account) {
+        account.setStatus("REVOKED");
+        account.setConfigContent("");
+        account.setLastError(null);
+        account.setUpdatedAt(java.time.LocalDateTime.now());
+        vpnAccountMapper.updateById(account);
+    }
+
+    @Transactional
+    protected void markRevokeFailed(VpnAccount account, SshCommandResult result) {
+        account.setLastError(trim("revoke exit=" + result.getExitCode()
+                + ", stderr=" + result.getStderr()
+                + ", stdout=" + result.getStdout()));
+        account.setUpdatedAt(java.time.LocalDateTime.now());
+        vpnAccountMapper.updateById(account);
     }
 
     @Transactional

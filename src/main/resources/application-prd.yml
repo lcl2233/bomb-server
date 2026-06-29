@@ -35,6 +35,7 @@ vpn:
     private-key-path: C:/Users/Administrator/.ssh/id_ed25519
     known-hosts-path: C:/Users/Administrator/.ssh/known_hosts
     script-path: /etc/wireguard/add-client.sh
+    remove-script-path: /etc/wireguard/remove-client.sh
     connect-timeout-ms: 15000
     command-timeout-ms: 60000
 

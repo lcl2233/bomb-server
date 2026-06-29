@@ -101,6 +101,11 @@ public class EntitlementService {
         return entitlements.size();
     }
 
+    public boolean hasActiveEntitlement(Long userId) {
+        UserEntitlement entitlement = getActiveEntitlement(userId);
+        return entitlement != null && EntitlementStatus.ACTIVE.name().equals(entitlement.getStatus());
+    }
+
     private UserEntitlement getActiveEntitlement(Long userId) {
         UserEntitlement entitlement = userEntitlementMapper.selectOne(new LambdaQueryWrapper<UserEntitlement>()
                 .eq(UserEntitlement::getUserId, userId)

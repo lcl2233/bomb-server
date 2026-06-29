@@ -43,6 +43,14 @@ public class ScheduledTasks {
         }
     }
 
+    @Scheduled(cron = "0 0 * * * ?")
+    public void revokeExpiredVpnAccounts() {
+        int count = vpnProvisioningService.revokeExpiredVpnAccounts();
+        if (count > 0) {
+            log.info("revoked expired vpn accounts: {}", count);
+        }
+    }
+
     @Scheduled(cron = "0 */10 * * * ?")
     public void expireEntitlements() {
         int count = entitlementService.expireOutdatedEntitlements();

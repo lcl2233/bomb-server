@@ -31,6 +31,12 @@ public class WireGuardSshExecutor {
         return execute(command);
     }
 
+    public SshCommandResult runRemoveClientScript(String clientName) {
+        validateClientName(clientName);
+        String command = properties.getRemoveScriptPath() + " " + clientName;
+        return execute(command);
+    }
+
     public SshCommandResult execute(String command) {
         Session session = null;
         ChannelExec channel = null;
