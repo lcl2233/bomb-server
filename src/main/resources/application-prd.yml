@@ -29,7 +29,7 @@ alipay:
 vpn:
   wireguard:
     enabled: true
-    host: 64.177.116.240
+    host: 10.8.0.1
     port: 22
     username: root
     private-key-path: C:/Users/Administrator/.ssh/id_ed25519
