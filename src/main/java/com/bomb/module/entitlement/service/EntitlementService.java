@@ -12,7 +12,7 @@ import com.bomb.module.order.entity.Order;
 import com.bomb.module.product.entity.Product;
 import com.bomb.module.product.service.ProductService;
 import com.bomb.module.vpn.entity.VpnAccount;
-import com.bomb.module.vpn.service.VpnProvisioningService;
+import com.bomb.module.vpn.mapper.VpnAccountMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,7 +27,7 @@ public class EntitlementService {
 
     private final UserEntitlementMapper userEntitlementMapper;
     private final ProductService productService;
-    private final VpnProvisioningService vpnProvisioningService;
+    private final VpnAccountMapper vpnAccountMapper;
 
     @Transactional
     public UserEntitlement grantEntitlement(Order order) {
@@ -65,7 +65,7 @@ public class EntitlementService {
         if (!EntitlementStatus.ACTIVE.name().equals(entitlement.getStatus())) {
             return null;
         }
-        return toVO(entitlement, vpnProvisioningService.getByUserId(userId));
+        return toVO(entitlement, getVpnAccountByUserId(userId));
     }
 
     public PageResult<EntitlementVO> listMyHistory(Long userId, long page, long size) {
@@ -148,7 +148,13 @@ public class EntitlementService {
     }
 
     private EntitlementVO toVO(UserEntitlement entitlement) {
-        return toVO(entitlement, vpnProvisioningService.getByUserId(entitlement.getUserId()));
+        return toVO(entitlement, getVpnAccountByUserId(entitlement.getUserId()));
+    }
+
+    private VpnAccount getVpnAccountByUserId(Long userId) {
+        return vpnAccountMapper.selectOne(new LambdaQueryWrapper<VpnAccount>()
+                .eq(VpnAccount::getUserId, userId)
+                .last("limit 1"));
     }
 
     private EntitlementVO toVO(UserEntitlement entitlement, VpnAccount vpnAccount) {
