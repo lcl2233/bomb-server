@@ -1,6 +1,7 @@
 package com.bomb.module.entitlement.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bomb.common.constant.EntitlementStatus;
 import com.bomb.common.result.PageResult;
@@ -91,19 +92,21 @@ public class EntitlementService {
 
     @Transactional
     public int expireOutdatedEntitlements() {
-        List<UserEntitlement> entitlements = userEntitlementMapper.selectList(new LambdaQueryWrapper<UserEntitlement>()
+        LocalDateTime now = LocalDateTime.now();
+        return userEntitlementMapper.update(null, new LambdaUpdateWrapper<UserEntitlement>()
+                .set(UserEntitlement::getStatus, EntitlementStatus.EXPIRED.name())
                 .eq(UserEntitlement::getStatus, EntitlementStatus.ACTIVE.name())
-                .lt(UserEntitlement::getExpireAt, LocalDateTime.now()));
-        for (UserEntitlement entitlement : entitlements) {
-            entitlement.setStatus(EntitlementStatus.EXPIRED.name());
-            userEntitlementMapper.updateById(entitlement);
-        }
-        return entitlements.size();
+                .le(UserEntitlement::getExpireAt, now));
     }
 
     public boolean hasActiveEntitlement(Long userId) {
-        UserEntitlement entitlement = getActiveEntitlement(userId);
-        return entitlement != null && EntitlementStatus.ACTIVE.name().equals(entitlement.getStatus());
+        UserEntitlement entitlement = userEntitlementMapper.selectOne(new LambdaQueryWrapper<UserEntitlement>()
+                .eq(UserEntitlement::getUserId, userId)
+                .eq(UserEntitlement::getStatus, EntitlementStatus.ACTIVE.name())
+                .gt(UserEntitlement::getExpireAt, LocalDateTime.now())
+                .orderByDesc(UserEntitlement::getId)
+                .last("limit 1"));
+        return entitlement != null;
     }
 
     private UserEntitlement getActiveEntitlement(Long userId) {
@@ -120,7 +123,7 @@ public class EntitlementService {
 
     private void refreshIfExpired(UserEntitlement entitlement) {
         if (EntitlementStatus.ACTIVE.name().equals(entitlement.getStatus())
-                && entitlement.getExpireAt().isBefore(LocalDateTime.now())) {
+                && !entitlement.getExpireAt().isAfter(LocalDateTime.now())) {
             entitlement.setStatus(EntitlementStatus.EXPIRED.name());
             userEntitlementMapper.updateById(entitlement);
         }

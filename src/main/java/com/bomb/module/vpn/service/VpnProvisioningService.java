@@ -3,9 +3,9 @@ package com.bomb.module.vpn.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bomb.common.constant.RedisKeys;
 import com.bomb.config.VpnWireGuardProperties;
+import com.bomb.module.entitlement.service.EntitlementService;
 import com.bomb.module.order.entity.Order;
 import com.bomb.module.order.service.OrderService;
-import com.bomb.module.entitlement.service.EntitlementService;
 import com.bomb.module.vpn.dto.SshCommandResult;
 import com.bomb.module.vpn.entity.VpnAccount;
 import com.bomb.module.vpn.mapper.VpnAccountMapper;
@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -25,6 +26,10 @@ import java.util.regex.Pattern;
 @Service
 @RequiredArgsConstructor
 public class VpnProvisioningService {
+
+    private static final String STATUS_ACTIVE = "ACTIVE";
+    private static final String STATUS_FAILED = "FAILED";
+    private static final String STATUS_REVOKED = "REVOKED";
 
     private static final Pattern CONFIG_BLOCK = Pattern.compile(
             "\\[Interface][\\s\\S]*",
@@ -51,7 +56,7 @@ public class VpnProvisioningService {
         }
 
         VpnAccount existing = getByUserId(order.getUserId());
-        if (existing != null && "ACTIVE".equals(existing.getStatus())) {
+        if (existing != null && STATUS_ACTIVE.equals(existing.getStatus())) {
             log.info("wireguard account already exists for user {}, skip order {}",
                     order.getUserId(), order.getOrderNo());
             return;
@@ -97,7 +102,7 @@ public class VpnProvisioningService {
 
     public int retryFailedProvisioning() {
         List<VpnAccount> failedAccounts = vpnAccountMapper.selectList(new LambdaQueryWrapper<VpnAccount>()
-                .eq(VpnAccount::getStatus, "FAILED"));
+                .eq(VpnAccount::getStatus, STATUS_FAILED));
         int retried = 0;
         for (VpnAccount account : failedAccounts) {
             try {
@@ -107,7 +112,7 @@ public class VpnProvisioningService {
                 }
                 provisionAfterPayment(order);
                 VpnAccount latest = getByUserId(account.getUserId());
-                if (latest != null && "ACTIVE".equals(latest.getStatus())) {
+                if (latest != null && STATUS_ACTIVE.equals(latest.getStatus())) {
                     retried++;
                 }
             } catch (Exception ex) {
@@ -123,16 +128,17 @@ public class VpnProvisioningService {
             return 0;
         }
 
-        int expiredCount = entitlementService.expireOutdatedEntitlements();
-        if (expiredCount > 0) {
-            log.info("marked expired entitlements before vpn revoke: {}", expiredCount);
+        int expired = entitlementService.expireOutdatedEntitlements();
+        if (expired > 0) {
+            log.info("expired entitlements before vpn revoke: {}", expired);
         }
 
         List<VpnAccount> activeAccounts = vpnAccountMapper.selectList(new LambdaQueryWrapper<VpnAccount>()
-                .eq(VpnAccount::getStatus, "ACTIVE"));
+                .eq(VpnAccount::getStatus, STATUS_ACTIVE));
         int revoked = 0;
         for (VpnAccount account : activeAccounts) {
             if (entitlementService.hasActiveEntitlement(account.getUserId())) {
+                log.debug("skip vpn revoke for user {}, active entitlement still exists", account.getUserId());
                 continue;
             }
             try {
@@ -182,10 +188,10 @@ public class VpnProvisioningService {
 
     @Transactional
     protected void markRevoked(VpnAccount account) {
-        account.setStatus("REVOKED");
+        account.setStatus(STATUS_REVOKED);
         account.setConfigContent("");
         account.setLastError(null);
-        account.setUpdatedAt(java.time.LocalDateTime.now());
+        account.setUpdatedAt(LocalDateTime.now());
         vpnAccountMapper.updateById(account);
     }
 
@@ -194,7 +200,7 @@ public class VpnProvisioningService {
         account.setLastError(trim("revoke exit=" + result.getExitCode()
                 + ", stderr=" + result.getStderr()
                 + ", stdout=" + result.getStdout()));
-        account.setUpdatedAt(java.time.LocalDateTime.now());
+        account.setUpdatedAt(LocalDateTime.now());
         vpnAccountMapper.updateById(account);
     }
 
@@ -206,12 +212,12 @@ public class VpnProvisioningService {
             account.setUserId(order.getUserId());
             account.setOrderId(order.getId());
             account.setClientName(clientName);
-            account.setCreatedAt(java.time.LocalDateTime.now());
+            account.setCreatedAt(LocalDateTime.now());
         }
         account.setConfigContent(configContent);
-        account.setStatus("ACTIVE");
+        account.setStatus(STATUS_ACTIVE);
         account.setLastError(null);
-        account.setUpdatedAt(java.time.LocalDateTime.now());
+        account.setUpdatedAt(LocalDateTime.now());
         if (account.getId() == null) {
             vpnAccountMapper.insert(account);
         } else {
@@ -236,12 +242,12 @@ public class VpnProvisioningService {
             account.setOrderId(order.getId());
             account.setClientName(clientName);
             account.setConfigContent("");
-            account.setCreatedAt(java.time.LocalDateTime.now());
+            account.setCreatedAt(LocalDateTime.now());
             vpnAccountMapper.insert(account);
         }
-        account.setStatus("FAILED");
+        account.setStatus(STATUS_FAILED);
         account.setLastError(trim(error));
-        account.setUpdatedAt(java.time.LocalDateTime.now());
+        account.setUpdatedAt(LocalDateTime.now());
         vpnAccountMapper.updateById(account);
     }
 
