@@ -1,7 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # WireGuard 删除客户端（会员过期 revoke 时由 bomb-server SSH 调用）
-# 用法: remove-client.sh <client_name>
-# 示例: remove-client.sh u1
+# 用法: remove-client.sh <client_name>  或  bash remove-client.sh u1
+# 注意: 不要用 sh 调用（Ubuntu 的 sh 是 dash，不支持本脚本语法）
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec bash "$0" "$@"
+fi
 set -euo pipefail
 
 WG_DIR="/etc/wireguard"

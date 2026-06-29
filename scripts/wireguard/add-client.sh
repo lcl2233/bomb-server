@@ -1,7 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # WireGuard 添加客户端（支付开通 VPN 时由 bomb-server SSH 调用）
-# 用法: add-client.sh <client_name> [ip_suffix]
-# 示例: add-client.sh u1
+# 用法: add-client.sh <client_name> [ip_suffix]  或  bash add-client.sh u1
+# 注意: 不要用 sh 调用（Ubuntu 的 sh 是 dash，不支持本脚本语法）
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec bash "$0" "$@"
+fi
 set -euo pipefail
 
 WG_DIR="/etc/wireguard"
