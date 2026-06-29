@@ -3,6 +3,7 @@ package com.bomb.module.vpn.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bomb.common.constant.RedisKeys;
 import com.bomb.config.VpnWireGuardProperties;
+import com.bomb.module.entitlement.entity.UserEntitlement;
 import com.bomb.module.entitlement.service.EntitlementService;
 import com.bomb.module.order.entity.Order;
 import com.bomb.module.order.service.OrderService;
@@ -18,7 +19,9 @@ import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -30,6 +33,7 @@ public class VpnProvisioningService {
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_FAILED = "FAILED";
     private static final String STATUS_REVOKED = "REVOKED";
+    private static final String STATUS_REVOKE_FAILED = "REVOKE_FAILED";
 
     private static final Pattern CONFIG_BLOCK = Pattern.compile(
             "\\[Interface][\\s\\S]*",
@@ -122,34 +126,33 @@ public class VpnProvisioningService {
         return retried;
     }
 
-    public int revokeExpiredVpnAccounts() {
-        if (!properties.isEnabled()) {
-            log.info("wireguard revoke disabled");
-            return 0;
-        }
+    public void expireAndReclaimEntitlements() {
+        List<UserEntitlement> outdatedEntitlements =
+                entitlementService.listOutdatedActiveEntitlements(LocalDateTime.now());
 
-        int expired = entitlementService.expireOutdatedEntitlements();
-        if (expired > 0) {
-            log.info("expired entitlements before vpn revoke: {}", expired);
-        }
-
-        List<VpnAccount> activeAccounts = vpnAccountMapper.selectList(new LambdaQueryWrapper<VpnAccount>()
-                .eq(VpnAccount::getStatus, STATUS_ACTIVE));
-        int revoked = 0;
-        for (VpnAccount account : activeAccounts) {
-            if (entitlementService.hasActiveEntitlement(account.getUserId())) {
-                log.debug("skip vpn revoke for user {}, active entitlement still exists", account.getUserId());
-                continue;
-            }
-            try {
-                if (revokeVpnAccount(account)) {
-                    revoked++;
-                }
-            } catch (Exception ex) {
-                log.warn("revoke wireguard account failed for user {}", account.getUserId(), ex);
+        for (UserEntitlement entitlement : outdatedEntitlements) {
+            if (entitlementService.expireEntitlementIfActive(entitlement)) {
+                reclaimVpnAccountByUserId(entitlement.getUserId());
             }
         }
-        return revoked;
+    }
+
+    private void reclaimVpnAccountByUserId(Long userId) {
+        VpnAccount account = vpnAccountMapper.selectOne(new LambdaQueryWrapper<VpnAccount>()
+                .eq(VpnAccount::getUserId, userId)
+                .in(VpnAccount::getStatus, List.of(STATUS_ACTIVE, STATUS_REVOKE_FAILED))
+                .orderByDesc(VpnAccount::getId)
+                .last("limit 1"));
+        if (account == null) {
+            return;
+        }
+
+        try {
+            revokeVpnAccount(account);
+        } catch (Exception ex) {
+            markRevokeFailed(account, ex.getMessage());
+            log.warn("reclaim wireguard account failed for user {}", userId, ex);
+        }
     }
 
     private boolean revokeVpnAccount(VpnAccount account) {
@@ -197,9 +200,15 @@ public class VpnProvisioningService {
 
     @Transactional
     protected void markRevokeFailed(VpnAccount account, SshCommandResult result) {
-        account.setLastError(trim("revoke exit=" + result.getExitCode()
+        markRevokeFailed(account, "revoke exit=" + result.getExitCode()
                 + ", stderr=" + result.getStderr()
-                + ", stdout=" + result.getStdout()));
+                + ", stdout=" + result.getStdout());
+    }
+
+    @Transactional
+    protected void markRevokeFailed(VpnAccount account, String error) {
+        account.setStatus(STATUS_REVOKE_FAILED);
+        account.setLastError(trim(error));
         account.setUpdatedAt(LocalDateTime.now());
         vpnAccountMapper.updateById(account);
     }

@@ -93,10 +93,28 @@ public class EntitlementService {
     @Transactional
     public int expireOutdatedEntitlements() {
         LocalDateTime now = LocalDateTime.now();
-        return userEntitlementMapper.update(null, new LambdaUpdateWrapper<UserEntitlement>()
-                .set(UserEntitlement::getStatus, EntitlementStatus.EXPIRED.name())
+        int expired = 0;
+        for (UserEntitlement entitlement : listOutdatedActiveEntitlements(now)) {
+            if (expireEntitlementIfActive(entitlement)) {
+                expired++;
+            }
+        }
+        return expired;
+    }
+
+    public List<UserEntitlement> listOutdatedActiveEntitlements(LocalDateTime now) {
+        return userEntitlementMapper.selectList(new LambdaQueryWrapper<UserEntitlement>()
                 .eq(UserEntitlement::getStatus, EntitlementStatus.ACTIVE.name())
                 .le(UserEntitlement::getExpireAt, now));
+    }
+
+    @Transactional
+    public boolean expireEntitlementIfActive(UserEntitlement entitlement) {
+        return userEntitlementMapper.update(null, new LambdaUpdateWrapper<UserEntitlement>()
+                .set(UserEntitlement::getStatus, EntitlementStatus.EXPIRED.name())
+                .eq(UserEntitlement::getId, entitlement.getId())
+                .eq(UserEntitlement::getStatus, EntitlementStatus.ACTIVE.name())
+                .le(UserEntitlement::getExpireAt, LocalDateTime.now())) > 0;
     }
 
     public boolean hasActiveEntitlement(Long userId) {
